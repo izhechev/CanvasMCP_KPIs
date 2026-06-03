@@ -1,0 +1,116 @@
+@startuml Auth
+
+left to right direction
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFF8F0
+skinparam classBackgroundColor #FDE8CC
+skinparam classBorderColor #C46B00
+skinparam classFontColor #1A0A00
+skinparam classHeaderBackgroundColor #E87722
+skinparam classHeaderFontColor #FFFFFF
+skinparam arrowColor #B85C00
+skinparam arrowFontColor #8B4500
+skinparam noteBackgroundColor #FFF3E0
+skinparam noteBorderColor #E87722
+skinparam noteFontColor #1A0A00
+
+title Auth — OAuth2 + PKCE flow
+
+interface OAuthStatePayload {
+  + teamsUserId: string
+  + codeVerifier: string
+}
+
+interface InMemoryEntry {
+  + payload: OAuthStatePayload
+  + expiresAt: number
+}
+
+abstract class OAuthStateStore {
+  + {abstract} put(state: string, payload: OAuthStatePayload): Promise<void>
+  + {abstract} consume(state: string): Promise<OAuthStatePayload | null>
+}
+
+class InMemoryOAuthStateStore {
+  - entries: Map<string, InMemoryEntry>
+  - ttlMs: number
+  - maxSize: number
+  + put(state, payload): Promise<void>
+  + consume(state): Promise<OAuthStatePayload | null>
+  - evictExpired(): void
+}
+
+class AuthService {
+  - config: ConfigService
+  - stateStore: OAuthStateStore
+  - tokenService: TokenService
+  + generateAuthUrl(teamsUserId: string): Promise<string>
+  + handleCallback(code: string, state: string): Promise<void>
+}
+
+class AuthController {
+  - authService: AuthService
+  + login(teamsUserId: string, res: Response): Promise<void>
+  + callback(code: string, state: string, error: string, errorDescription: string, res: Response): Promise<void>
+}
+
+class HealthController {
+  + check(): { status: string }
+}
+
+' ── cross-diagram stubs ──────────────────────────────────────
+class ConfigService   <<ref: NestJS>>
+class TokenService    <<ref: token>>
+class HttpUtil        <<ref: common>>
+class AppError        <<ref: common>>
+class OAuthStateError <<ref: common>>
+class TokenExchangeError <<ref: common>>
+
+InMemoryOAuthStateStore --|> OAuthStateStore
+InMemoryOAuthStateStore *--> InMemoryEntry       : entries (Map values)
+InMemoryEntry           *--> OAuthStatePayload   : payload
+OAuthStateStore         ..> OAuthStatePayload    : read / write
+AuthService             *--> ConfigService       : config
+AuthService             *--> OAuthStateStore     : stateStore
+AuthService             *--> TokenService        : tokenService
+AuthService             ..> HttpUtil             : fetchJson() for token exchange
+AuthService             ..> OAuthStateError      : <<throws>>
+AuthService             ..> TokenExchangeError   : <<throws>>
+InMemoryOAuthStateStore ..> AppError             : <<throws>> (at capacity, 503)
+AuthController          *--> AuthService         : authService
+
+note bottom of InMemoryOAuthStateStore
+  TTL 10 min, max 500 entries.
+  consume() deletes on read — one-time use,
+  prevents CSRF replay attacks.
+  evictExpired() runs on each put() and consume().
+end note
+
+note bottom of AuthService
+  generateAuthUrl():
+    code_verifier -> S256 challenge -> store state
+    returns Canvas /login/oauth2/auth URL
+
+  handleCallback():
+    POSTs to Canvas /login/oauth2/token
+    via HttpUtil directly (not CanvasService).
+    On success: TokenService.storeToken().
+
+  Throws OAuthStateError on unknown/expired state.
+  Throws TokenExchangeError if Canvas rejects code.
+end note
+
+note bottom of AuthController
+  GET /auth/canvas          -> login()
+  GET /auth/canvas/callback -> callback()
+  No HTTP-level spec exists — coverage gap.
+end note
+
+note bottom of HealthController
+  GET /health -> check()
+  Returns { status: 'ok' } — liveness probe.
+  No authentication required.
+end note
+
+@enduml

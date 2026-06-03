@@ -1,0 +1,94 @@
+@startuml Common
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFF8F0
+skinparam classBackgroundColor #FDE8CC
+skinparam classBorderColor #C46B00
+skinparam classFontColor #1A0A00
+skinparam classHeaderBackgroundColor #E87722
+skinparam classHeaderFontColor #FFFFFF
+skinparam arrowColor #B85C00
+skinparam arrowFontColor #8B4500
+skinparam noteBackgroundColor #FFF3E0
+skinparam noteBorderColor #E87722
+skinparam noteFontColor #1A0A00
+
+title Common — errors, HTTP utilities & helpers
+
+class AppError {
+  + status: number
+  + AppError(message: string, status: number, options?: ErrorOptions)
+}
+
+together {
+  class OAuthStateError <<400>>
+  class TokenExchangeError <<401>>
+  class CanvasAuthError <<403>>
+  class CanvasRateLimitError <<429>>
+}
+together {
+  class MissingAccessTokenError <<401>> {
+    + studentId: string
+  }
+  class InvalidEncryptionKeyError <<500>>
+  class HttpError {
+    + HttpError(status: number, statusText: string)
+  }
+}
+
+OAuthStateError           -[hidden]right-> TokenExchangeError
+TokenExchangeError        -[hidden]right-> CanvasAuthError
+CanvasAuthError           -[hidden]right-> CanvasRateLimitError
+MissingAccessTokenError   -[hidden]right-> InvalidEncryptionKeyError
+InvalidEncryptionKeyError -[hidden]right-> HttpError
+
+OAuthStateError           --|> AppError
+TokenExchangeError        --|> AppError
+CanvasAuthError           --|> AppError
+CanvasRateLimitError      --|> AppError
+MissingAccessTokenError   --|> AppError
+InvalidEncryptionKeyError --|> AppError
+HttpError                 --|> AppError
+
+class AppErrorFilter <<ExceptionFilter>> {
+  + catch(error: AppError, host: ArgumentsHost): void
+}
+
+class HttpUtil <<module>> {
+  + fetchJson<T>(url: string, init?): Promise<T>
+  + fetchAllPages<T>(url: string, init?): Promise<T[]>
+  - parseNextLink(linkHeader: string | null): string | null
+}
+
+class StripHtml <<module>> {
+  + stripHtml(html: string): string
+}
+
+AppErrorFilter ..> AppError : catches
+HttpUtil       ..> HttpError : <<throws>>
+
+note right of AppError
+  Base for all domain errors.
+  Carries an HTTP status code.
+end note
+
+note right of AppErrorFilter
+  Global NestJS filter, registered in main.ts.
+  Maps AppError.status to the HTTP response code.
+end note
+
+note right of HttpUtil
+  Standalone exported functions — no HttpUtil class exists.
+  fetchAllPages() follows Canvas
+  Link: <url>; rel="next" headers
+  until no "next" rel (100 items / page).
+  fetchJson() for single-resource calls.
+end note
+
+note right of StripHtml
+  Standalone exported function — no StripHtml class exists.
+  Strips HTML tags, collapses whitespace.
+  Used by getInboxTool to sanitise Canvas message bodies.
+end note
+
+@enduml

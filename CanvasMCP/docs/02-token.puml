@@ -1,0 +1,119 @@
+@startuml Token
+
+left to right direction
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFF8F0
+skinparam classBackgroundColor #FDE8CC
+skinparam classBorderColor #C46B00
+skinparam classFontColor #1A0A00
+skinparam classHeaderBackgroundColor #E87722
+skinparam classHeaderFontColor #FFFFFF
+skinparam arrowColor #B85C00
+skinparam arrowFontColor #8B4500
+skinparam noteBackgroundColor #FFF3E0
+skinparam noteBorderColor #E87722
+skinparam noteFontColor #1A0A00
+
+title Token — storage, encryption & resolution
+
+interface StoreTokenInput {
+  + canvasUserId: number
+  + accessToken: string
+  + refreshToken: string
+  + expiresAt: Date
+}
+
+interface TokenRecord {
+  + teamsUserId: string
+  + canvasUserId: number
+  + accessToken: string
+  + refreshToken: string
+  + expiresAt: Date
+  + lastActiveAt: Date
+}
+
+interface EncryptedTokenRecord {
+  + teamsUserId: string
+  + canvasUserId: number
+  + accessTokenEncrypted: string
+  + refreshTokenEncrypted: string
+  + expiresAt: Date
+  + lastActiveAt: Date
+}
+
+class TokenCrypto <<module>> {
+  + encrypt(plaintext: string, keyHex: string): string
+  + decrypt(ciphertext: string, keyHex: string): string
+  - parseKey(keyHex: string): Buffer
+}
+
+abstract class TokenStore {
+  + {abstract} save(record: EncryptedTokenRecord): Promise<void>
+  + {abstract} find(teamsUserId: string): Promise<EncryptedTokenRecord | null>
+  + {abstract} delete(teamsUserId: string): Promise<void>
+  + {abstract} deleteOlderThan(cutoff: Date): Promise<number>
+}
+
+class InMemoryTokenStore {
+  - records: Map<string, EncryptedTokenRecord>
+  + save(record): Promise<void>
+  + find(teamsUserId): Promise<EncryptedTokenRecord | null>
+  + delete(teamsUserId): Promise<void>
+  + deleteOlderThan(cutoff: Date): Promise<number>
+}
+
+class TokenService {
+  - store: TokenStore
+  - config: ConfigService
+  + resolveToken(studentId: string): Promise<string>
+  + storeToken(teamsUserId: string, input: StoreTokenInput): Promise<void>
+  + getToken(teamsUserId: string): Promise<TokenRecord | null>
+  + getAccessToken(teamsUserId: string): Promise<string>
+  + deleteToken(teamsUserId: string): Promise<void>
+  + isExpiringSoon(record: TokenRecord): boolean
+}
+
+' ── cross-diagram stubs ─────────────────────────────────────
+class ConfigService           <<ref: NestJS>>
+class MissingAccessTokenError <<ref: common>> {
+  + studentId: string
+}
+class InvalidEncryptionKeyError <<ref: common>>
+
+InMemoryTokenStore --|> TokenStore
+TokenStore         ..> EncryptedTokenRecord    : persists
+TokenService       *--> TokenStore             : store
+TokenService       *--> ConfigService          : config
+TokenService       ..> TokenCrypto             : encrypt / decrypt
+TokenService       ..> StoreTokenInput         : accepts
+TokenService       ..> TokenRecord             : returns
+TokenService       ..> MissingAccessTokenError : <<throws>>
+TokenCrypto        ..> InvalidEncryptionKeyError : <<throws>>
+
+note bottom of TokenService
+  resolveToken() priority:
+  1. CANVAS_TEST_TOKEN env (NODE_ENV != production)
+  2. find() from store -> decrypt -> return bearer
+  3. throw MissingAccessTokenError
+
+  refreshToken stored but NOT auto-used.
+  isExpiringSoon() flags expiry within 5 min —
+  caller must trigger a new OAuth flow.
+end note
+
+note bottom of TokenCrypto
+  Standalone exported functions — no TokenCrypto class exists.
+  AES-256-GCM.
+  Key: TOKEN_ENCRYPTION_KEY (64-char hex).
+  Format: IV:AuthTag:CiphertextHex.
+  New random IV per encrypt() call.
+end note
+
+note bottom of InMemoryTokenStore
+  Dev / single-instance only.
+  No TTL-eviction (manual deleteOlderThan).
+  Swap for a PostgreSQL subclass in prod.
+end note
+
+@enduml

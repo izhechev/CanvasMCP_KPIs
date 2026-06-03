@@ -1,0 +1,137 @@
+@startuml MCP
+
+top to bottom direction
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFF8F0
+skinparam classBackgroundColor #FDE8CC
+skinparam classBorderColor #C46B00
+skinparam classFontColor #1A0A00
+skinparam classHeaderBackgroundColor #E87722
+skinparam classHeaderFontColor #FFFFFF
+skinparam arrowColor #B85C00
+skinparam arrowFontColor #8B4500
+skinparam noteBackgroundColor #FFF3E0
+skinparam noteBorderColor #E87722
+skinparam noteFontColor #1A0A00
+
+title MCP — tool server & tool handlers
+
+class FastMCP <<external>> {
+  + addTool(definition): void
+  + start(options): Promise<void>
+  + stop(): Promise<void>
+}
+
+class FastMcpCanvasServer {
+  - server: FastMCP
+  - mcpPort: number
+  - canvasApi: CanvasService
+  - tokenService: TokenService
+  + onModuleInit(): void
+  + onModuleDestroy(): Promise<void>
+  - registerTools(): void
+}
+
+interface ToolDeps {
+  + canvasApi: CanvasService
+  + tokenService: TokenService
+}
+
+interface Tool {
+  + name: string
+  + description: string
+  + parameters: z.ZodObject<ZodRawShape>
+  + handle(deps: ToolDeps, args: object): Promise<unknown>
+}
+
+together {
+  object getCoursesTool <<tool>> {
+    name = "get_courses"
+  }
+  object getGradesTool <<tool>> {
+    name = "get_grades"
+  }
+  object getAssignmentsTool <<tool>> {
+    name = "get_assignments"
+  }
+  object getAnnouncementsTool <<tool>> {
+    name = "get_announcements"
+  }
+}
+together {
+  object getFeedbackTool <<tool>> {
+    name = "get_feedback"
+  }
+  object getSubmissionHistoryTool <<tool>> {
+    name = "get_submission_history"
+  }
+  object getCalendarTool <<tool>> {
+    name = "get_calendar"
+  }
+  object getInboxTool <<tool>> {
+    name = "get_inbox"
+  }
+}
+
+getCoursesTool           -[hidden]right-> getGradesTool
+getGradesTool            -[hidden]right-> getAssignmentsTool
+getAssignmentsTool       -[hidden]right-> getAnnouncementsTool
+getFeedbackTool          -[hidden]right-> getSubmissionHistoryTool
+getSubmissionHistoryTool -[hidden]right-> getCalendarTool
+getCalendarTool          -[hidden]right-> getInboxTool
+
+' ── cross-diagram stubs ──────────────────────────────────────
+class CanvasService <<ref: canvas>>
+class TokenService  <<ref: token>>
+class StripHtml     <<ref: common>>
+
+FastMcpCanvasServer *--> FastMCP        : server
+FastMcpCanvasServer *--> CanvasService  : canvasApi
+FastMcpCanvasServer *--> TokenService   : tokenService
+FastMcpCanvasServer ..> Tool            : addTool() ×8
+ToolDeps            --> CanvasService   : canvasApi
+ToolDeps            --> TokenService    : tokenService
+
+getCoursesTool           ..|> Tool
+getGradesTool            ..|> Tool
+getAssignmentsTool       ..|> Tool
+getAnnouncementsTool     ..|> Tool
+getFeedbackTool          ..|> Tool
+getSubmissionHistoryTool ..|> Tool
+getCalendarTool          ..|> Tool
+getInboxTool             ..|> Tool
+getInboxTool             ..> StripHtml : stripHtml()
+
+Tool ..> ToolDeps : handle(deps, args)
+
+note right of FastMCP
+  npm: fastmcp — <<external>>.
+  Provides MCP protocol transport.
+  Not owned by this codebase.
+end note
+
+note right of FastMcpCanvasServer
+  onModuleInit(): registers all 8 tools,
+  starts HTTP transport on MCP_PORT.
+  Only runs if MCP_PORT env var is set.
+  onModuleDestroy(): server.stop().
+  MCP entry point — NOT an HTTP REST controller.
+end note
+
+note right of Tool
+  Parameters validated by Zod before
+  handle() is called. student_id is a
+  required param on all tools except get_grades.
+end note
+
+note bottom of getCoursesTool
+  Exported as const objects, not class instances.
+  All 8 tools share the same pattern:
+  1. tokenService.resolveToken(student_id)
+  2. canvasApi.<method>(token, ...)
+  3. Map CanvasXxx -> XxxResult (LLM-friendly)
+  4. Return result; server JSON.stringifies for MCP transport
+end note
+
+@enduml

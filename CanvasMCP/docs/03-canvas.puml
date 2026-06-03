@@ -1,0 +1,162 @@
+@startuml Canvas
+
+top to bottom direction
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFF8F0
+skinparam classBackgroundColor #FDE8CC
+skinparam classBorderColor #C46B00
+skinparam classFontColor #1A0A00
+skinparam classHeaderBackgroundColor #E87722
+skinparam classHeaderFontColor #FFFFFF
+skinparam arrowColor #B85C00
+skinparam arrowFontColor #8B4500
+skinparam noteBackgroundColor #FFF3E0
+skinparam noteBorderColor #E87722
+skinparam noteFontColor #1A0A00
+
+title Canvas — API client & response types
+
+class CanvasService {
+  - baseUrl: string
+  + getCourses(token, enrollmentState?): Promise<CanvasCourse[]>
+  + getEnrollments(token, courseId?): Promise<CanvasEnrollment[]>
+  + getAssignments(token, courseId): Promise<CanvasAssignment[]>
+  + getAnnouncements(token, courses, count?): Promise<Array<CanvasAnnouncement & { course_name: string }>>
+  + getSubmissions(token, courseId): Promise<CanvasSubmission[]>
+  + getCalendarEvents(token, courseIds, start?, end?): Promise<CanvasCalendarEvent[]>
+  + getConversations(token): Promise<CanvasConversation[]>
+  + getConversationMessages(token, id): Promise<CanvasConversationDetail>
+  - get<T>(url, token): Promise<T>
+}
+
+note right of CanvasService
+  Every call adds Authorization: Bearer + User-Agent.
+  Private get<T>() delegates to fetchJson().
+  getConversations() calls fetchAllPages() directly.
+  baseUrl: fhict.instructure.com (configurable).
+end note
+
+together {
+  interface CanvasCourse {
+    + id: number
+    + name: string
+    + course_code: string
+    + created_at: string
+    + start_at: string | null
+    + end_at: string | null
+    + enrollments?: Array<{ type: string; computed_current_score: number|null; computed_current_grade: string|null }>
+  }
+
+  interface CanvasAssignment {
+    + id: number
+    + name: string
+    + due_at: string | null
+    + points_possible: number | null
+    + submission_types: string[]
+    + description: string | null
+    + rubric?: CanvasRubricCriterion[]
+  }
+
+  interface CanvasSubmission {
+    + assignment_id: number
+    + course_id?: number
+    + attempt: number | null
+    + score: number | null
+    + grade: string | null
+    + workflow_state?: string
+    + submitted_at: string | null
+    + graded_at: string | null
+    + submission_comments?: Array<{ comment: string; author_name: string }>
+    + rubric_assessment?: Record<string, { points: number; description?: string }>
+    + assignment?: CanvasAssignment
+  }
+}
+
+interface CanvasRubricCriterion {
+  + id: string
+  + description: string
+  + ratings: Array<{ id: string; points: number; description: string }>
+}
+
+together {
+  interface CanvasEnrollment {
+    + course_id: number
+    + course?: { name: string; course_code: string }
+    + grades?: { current_score: number | null; current_grade: string | null }
+    + last_activity_at: string | null
+  }
+
+  interface CanvasAnnouncement {
+    + id: number
+    + title: string
+    + posted_at: string
+    + author: { display_name: string } | null
+    + message: string
+    + html_url: string
+  }
+}
+
+together {
+  interface CanvasCalendarEvent {
+    + id: number
+    + title: string
+    + start_at: string
+    + end_at: string | null
+    + description: string | null
+    + html_url: string
+    + context_code: string
+    + type: string
+  }
+
+  interface CanvasConversation {
+    + id: number
+    + subject: string
+    + last_message: string
+    + last_message_at: string
+    + message_count: number
+    + workflow_state: string
+    + context_name: string | null
+    + participants: Array<{ name: string }>
+  }
+}
+
+interface CanvasConversationDetail {
+  + messages: Array<{ body: string; author_id: number; created_at: string }>
+}
+
+CanvasEnrollment    -[hidden]right-> CanvasAnnouncement
+CanvasCalendarEvent -[hidden]right-> CanvasConversation
+
+' ── cross-diagram stubs (defined in 01-common) ──────────────
+class HttpUtil <<ref: common>>
+class ConfigService <<ref: NestJS>>
+class CanvasAuthError <<ref: common>>
+class CanvasRateLimitError <<ref: common>>
+
+CanvasCourse           -[hidden]right-> CanvasAssignment
+CanvasAssignment       -[hidden]right-> CanvasSubmission
+
+CanvasService *--> ConfigService          : config
+CanvasService ..> HttpUtil                : fetchJson / fetchAllPages
+CanvasService ..> CanvasCourse            : returns
+CanvasService ..> CanvasAssignment        : returns
+CanvasService ..> CanvasSubmission        : returns
+CanvasService ..> CanvasEnrollment        : returns
+CanvasService ..> CanvasAnnouncement      : returns
+CanvasService ..> CanvasCalendarEvent     : returns
+CanvasService ..> CanvasConversation      : returns
+CanvasService ..> CanvasConversationDetail : returns
+CanvasService ..> CanvasAuthError         : <<throws>> (403)
+CanvasService ..> CanvasRateLimitError    : <<throws>> (429)
+
+CanvasAssignment ..> CanvasRubricCriterion  : rubric[]
+CanvasSubmission ..> CanvasAssignment : assignment?
+
+note right of CanvasSubmission
+  workflow_state: "submitted" | "graded"
+  | "pending_review" | "unsubmitted"
+  rubric_assessment keyed by criterion id.
+end note
+
+@enduml
