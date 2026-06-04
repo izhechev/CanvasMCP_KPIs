@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: canvasmcp
+      POSTGRES_USER: canvasmcp
+      POSTGRES_PASSWORD: devpassword
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U canvasmcp -d canvasmcp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://canvasmcp:devpassword@postgres:5432/canvasmcp
+      MCP_PORT: "3001"
+      FONTYS_REDIRECT_URI: http://localhost:3000/auth/canvas/callback
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  inspector:
+    build: .
+    ports:
+      - "6274:6274"
+      - "6277:6277"
+    environment:
+      HOST: "0.0.0.0"
+    command: npm run inspector
+    depends_on:
+      - app
+
+volumes:
+  postgres-data:
