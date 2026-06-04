@@ -67,7 +67,7 @@ export class FastMcpCanvasServer implements OnModuleInit, OnModuleDestroy {
       this.server
         .start({
           transportType: 'httpStream',
-          httpStream: { port: this.mcpPort },
+          httpStream: { port: this.mcpPort, host: '0.0.0.0' },
         })
         .then(() =>
           this.logger.log(`MCP server listening on port ${this.mcpPort}`),

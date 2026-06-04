@@ -10,6 +10,67 @@ Student → Teams → Bot (NestJS) → LLM (GPT-5) → MCP Server (FastMCP) → 
                                                  Token Store (PostgreSQL)
 ```
 
+## Non-functional requirements
+
+Load measurements taken with **autocannon v8.0.0** against the compiled production build (`npm run build` → `node dist/main.js`).  
+Test conditions: 10 concurrent connections, 30 s duration per endpoint, PostgreSQL 16 running in Docker on localhost, Windows 11 laptop (no network hop).
+
+| Endpoint | Req/s (avg) | Req/s (p50) | p50 lat | p95 lat | p99 lat | Errors |
+|----------|-------------|-------------|---------|---------|---------|--------|
+| `GET /health` | 10,670 | 10,815 | < 1 ms | 1 ms | 1 ms | 0 / 320,093 |
+| `GET /auth/login` | 6,627 | 6,671 | 1 ms | 1 ms | 1 ms | 0 / 198,797 |
+| `POST /mcp` (initialize) | 2,274 | 2,307 | 4 ms | 9 ms | 10 ms | 0 / 68,220 |
+
+**Observations**
+
+- `/health` is pure in-process (no I/O) — ~10 k req/s is consistent with a typical NestJS/Express baseline on a dev laptop.
+- `/auth/login` renders ~700-byte HTML per request (URLSearchParams + template interpolation) and saturates at ~6.6 k req/s; it does not touch the database.
+- The MCP `initialize` call establishes an SSE session (FastMCP httpStream transport) and does more per-request work: JSON-RPC parsing, capability negotiation, and streaming response. At ~2.3 k req/s / 4 ms p50 it is well within acceptable range. Real `tools/call` requests will additionally incur Canvas REST API latency (typically 100–400 ms network round-trip), so throughput for those is bounded by Canvas, not by this server.
+- Error rate is **0% across all endpoints** at 10 concurrent connections.
+
+**Reproducing the measurements**
+
+```bash
+# Prerequisites: app running on :3000 / :3001 (see Local setup below)
+npm install -g autocannon
+
+autocannon -c 10 -d 30 http://localhost:3000/health
+autocannon -c 10 -d 30 "http://localhost:3000/auth/login?teamsUserId=test123"
+autocannon -c 10 -d 30 -m POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -b '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"bench","version":"1.0"}}}' \
+  http://localhost:3001/mcp
+```
+
+## Data minimisation (GDPR)
+
+Canvas REST API responses contain many fields the LLM never needs: institution admin IDs, LTI/SCORM governance flags, anonymous grading settings, internal UUIDs. Each tool maps Canvas objects to a minimal shape before the data reaches the LLM context window. The table below was measured against real Canvas API responses from the Fontys production instance (one object per endpoint, July 2025).
+
+| Tool | Raw fields | Mapped fields | Raw bytes | Mapped bytes | Reduction |
+|---|---:|---:|---:|---:|---:|
+| `get_courses` | 32 | 7 | 1,111 | 170 | 85% |
+| `get_assignments` | 68 | 8 | 15,040 | 489 | 97% |
+| `get_grades` | 33 | 9 | 8,324 | 220 | 97% |
+| `get_announcements` | 53 | 6 | 6,422 | 2,665 | 59% |
+| `get_feedback` | 33 | 6 | 8,324 | 138 | 98% |
+| `get_calendar` | 19 | 8 | 21,912 | 1,315 | 94% |
+| `get_inbox` | 19 | 7 | 828 | 298 | 64% |
+| `get_submission_history` | 33 | 10 | 8,324 | 249 | 97% |
+| **All 8 tools combined** | | | **70,285** | **5,544** | **92%** |
+
+**92% of what Canvas returns never reaches the LLM.** Across a single user session that calls all 8 tools, 64,741 bytes of student and institutional data are discarded server-side before being forwarded.
+
+Fields stripped include:
+- **Institution admin data** (`account_id`, `root_account_id`, `enrollment_term_id`, `uuid`) — internal Canvas identifiers students and LLMs do not need
+- **Technical/security fields** (`secure_params`, `lti_context_id`, `annotatable_attachment_id`) — LTI integration tokens and attachment IDs
+- **Governance flags** (`moderated_grading`, `peer_reviews`, `post_to_sis`, `grade_passback_setting`, `anonymous_grading`) — 20+ assignment configuration fields
+- **Redundant PII** (`grader_id`, `author_id`, `user_id` in submissions) — numeric IDs that duplicate the session identity already resolved server-side
+
+The `get_announcements` reduction is lower (59%) because announcement bodies are large HTML documents and we preserve the full text after stripping HTML tags. The `get_calendar` raw size (21,912 bytes) is high because Canvas embeds the entire assignment object (68 fields) inside each calendar entry — the map throws away 60 of those fields.
+
+**Design implication:** This 92% reduction is not incidental — it is the primary purpose of the tool layer. Without it, calling eight Canvas endpoints would forward ~70 KB of mixed student, institutional, and governance data to the LLM per request. With the mapping layer it is ~5.5 KB, all of it directly relevant to answering the student's question.
+
 ## Test Coverage
 
 Measured with `npm run test:cov` (166 tests, 21 suites):

@@ -39,6 +39,7 @@ services:
       - "6277:6277"
     environment:
       HOST: "0.0.0.0"
+      DANGEROUSLY_OMIT_AUTH: "true"
     command: npm run inspector
     depends_on:
       - app
