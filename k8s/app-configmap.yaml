@@ -8,5 +8,5 @@ data:
   CANVAS_BASE_URL: "https://fhict.instructure.com"
   FONTYS_ISSUER_URL: "https://identity.fhict.nl"
   FONTYS_CLIENT_ID: "i508447-canvasmcpa"
-  FONTYS_REDIRECT_URI: "http://LOAD_BALANCER_IP/auth/canvas/callback"
+  FONTYS_REDIRECT_URI: "http://20.91.167.219/auth/canvas/callback"
   SESSION_INACTIVITY_DAYS: "30"
