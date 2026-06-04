@@ -29,24 +29,28 @@ export class FastMcpCanvasServer implements OnModuleInit, OnModuleDestroy {
     private readonly tokenService: TokenService,
     private readonly sessionStore: SessionStore,
   ) {
+    const isProd = process.env.NODE_ENV === 'production';
+
     this.server = new FastMCP({
       name: 'canvas-mcp',
       version: '1.0.0',
-      // authenticate is called once per MCP connection before any tool is invoked.
-      // The Teams bot sends Authorization: Bearer <sessionToken> after the student logs in.
-      // We resolve the session token to the teamsUserId so tools can look up the Canvas token.
-      authenticate: (request: {
-        headers?: Record<string, string | string[] | undefined>;
-      }) => {
-        const raw = request?.headers?.['authorization'];
-        const header = Array.isArray(raw) ? raw[0] : raw;
-        const token = header?.startsWith('Bearer ')
-          ? header.slice(7).trim()
-          : '';
-        return this.sessionStore
-          .resolve(token)
-          .then((studentId) => ({ studentId: studentId ?? '' }));
-      },
+      // authenticate is only wired in production — in dev mode omitting it prevents
+      // FastMCP from returning 401, which would trigger the MCP Inspector's OAuth flow.
+      // In dev, CANVAS_TEST_TOKEN is used for all tool calls regardless of studentId.
+      ...(isProd && {
+        authenticate: (request: {
+          headers?: Record<string, string | string[] | undefined>;
+        }) => {
+          const raw = request?.headers?.['authorization'];
+          const header = Array.isArray(raw) ? raw[0] : raw;
+          const token = header?.startsWith('Bearer ')
+            ? header.slice(7).trim()
+            : '';
+          return this.sessionStore
+            .resolve(token)
+            .then((studentId) => ({ studentId: studentId ?? '' }));
+        },
+      }),
     });
   }
 
@@ -62,7 +66,6 @@ export class FastMcpCanvasServer implements OnModuleInit, OnModuleDestroy {
     if (process.env.MCP_PORT) {
       this.server
         .start({
-          // httpStream is the MCP transport type: tool calls arrive as HTTP streaming JSON
           transportType: 'httpStream',
           httpStream: { port: this.mcpPort },
         })
