@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: canvasmcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: canvasmcp
+  template:
+    metadata:
+      labels:
+        app: canvasmcp
+    spec:
+      containers:
+        - name: canvasmcp
+          image: canvasmcpacr.azurecr.io/canvasmcp:latest
+          ports:
+            - containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 5

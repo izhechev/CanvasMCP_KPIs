@@ -33,3 +33,7 @@ Thumbs.db
 
 # Superpowers plugin docs
 docs/superpowers/
+
+# Kubernetes secrets (contain real credentials)
+k8s/app-secret.yaml
+k8s/postgres-secret.yaml
