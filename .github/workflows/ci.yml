@@ -58,6 +58,7 @@ jobs:
         run: |
           az acr build \
             --registry canvasmcpacr \
+            --resource-group canvasmcp-rg \
             --image canvasmcp:${{ github.sha }} \
             --image canvasmcp:latest \
             .
@@ -75,4 +76,4 @@ jobs:
             canvasmcp=canvasmcpacr.azurecr.io/canvasmcp:${{ github.sha }}
 
       - name: Wait for rollout
-        run: kubectl rollout status deployment/canvasmcp --timeout=120s
+        run: kubectl rollout status deployment/canvasmcp --timeout=300s
