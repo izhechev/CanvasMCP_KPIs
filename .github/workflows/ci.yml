@@ -43,6 +43,9 @@ jobs:
     needs: ci
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
