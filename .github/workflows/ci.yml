@@ -57,14 +57,17 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Log in to ACR
+        run: az acr login --name canvasmcpacr
+
       - name: Build and push image to ACR
         run: |
-          az acr build \
-            --registry canvasmcpacr \
-            --resource-group canvasmcp-rg \
-            --image canvasmcp:${{ github.sha }} \
-            --image canvasmcp:latest \
+          docker build \
+            -t canvasmcpacr.azurecr.io/canvasmcp:${{ github.sha }} \
+            -t canvasmcpacr.azurecr.io/canvasmcp:latest \
             .
+          docker push canvasmcpacr.azurecr.io/canvasmcp:${{ github.sha }}
+          docker push canvasmcpacr.azurecr.io/canvasmcp:latest
 
       - name: Get AKS credentials
         run: |
