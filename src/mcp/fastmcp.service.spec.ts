@@ -69,7 +69,7 @@ describe('FastMcpCanvasServer', () => {
       server.onModuleInit();
       expect(mockFastMcp.start).toHaveBeenCalledWith({
         transportType: 'httpStream',
-        httpStream: { port: 3001 },
+        httpStream: { port: 3001, host: '0.0.0.0' },
       });
       delete process.env.MCP_PORT;
     });
@@ -83,12 +83,25 @@ describe('FastMcpCanvasServer', () => {
   });
 
   describe('authenticate callback', () => {
+    type AuthenticateFn = (req: {
+      headers?: Record<string, string | string[] | undefined>;
+    }) => Promise<{ studentId: string }>;
+
+    let authenticate: AuthenticateFn;
+
+    beforeEach(async () => {
+      // The authenticate callback is only wired in production mode.
+      // Clear the outer beforeEach's mock state and create a fresh production server.
+      jest.clearAllMocks();
+      process.env.NODE_ENV = 'production';
+      await createServer();
+      process.env.NODE_ENV = 'test';
+      authenticate = (
+        (FastMCP as jest.Mock).mock.calls[0][0] as { authenticate: AuthenticateFn }
+      ).authenticate;
+    });
+
     it('resolves Bearer token to studentId', async () => {
-      const { authenticate } = (FastMCP as jest.Mock).mock.calls[0][0] as {
-        authenticate: (req: {
-          headers?: Record<string, string>;
-        }) => Promise<{ studentId: string }>;
-      };
       mockSessionStore.resolve.mockResolvedValue('student-123');
 
       const result = await authenticate({
@@ -101,11 +114,6 @@ describe('FastMcpCanvasServer', () => {
     });
 
     it('returns empty studentId when no Authorization header', async () => {
-      const { authenticate } = (FastMCP as jest.Mock).mock.calls[0][0] as {
-        authenticate: (req: {
-          headers?: Record<string, string>;
-        }) => Promise<{ studentId: string }>;
-      };
       mockSessionStore.resolve.mockResolvedValue(null);
 
       const result = await authenticate({ headers: {} });
